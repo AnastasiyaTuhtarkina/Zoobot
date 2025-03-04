@@ -38,6 +38,12 @@ def start(message):
 def get_text_messages(message):
     user_id = message.from_user.id
 
+    # Если пользователь уже в процессе выбора животного,
+    # передаем сообщение специальному обработчику
+    if user_id in user_states and user_states[user_id].state == "selecting_animal":
+        handle_animal_selection(message)
+        return
+
     if message.text == '👋 Поздороваться':
         buttons = ['⚜ Узнать свое тотемное животное', '💚 Официальный сайт Московского зоопарка', '💲 Наша спонсорская программа']
         markup = create_markup(buttons)
@@ -166,7 +172,6 @@ def handle_animal_selection(message):
 
     # Handle the selected animal
     animal_chosen(user_id, selected_animal)
-    print("Handling animal selection")
 
 def animal_chosen(user_id, chosen_animal):
     if chosen_animal not in ANIMAL_IMAGES:
@@ -190,7 +195,8 @@ def animal_chosen(user_id, chosen_animal):
         bot.send_message(user_id, f"Произошла ошибка при обработке изображения для {chosen_animal}.")
 
     # Post to VK (if applicable)
-    post_to_vk(user_id, chosen_animal, image_url)
+    auth_url = generate_vk_auth_url()
+    bot.send_message(user_id, f"Чтобы опубликовать информацию о {chosen_animal}, пожалуйста, перейдите по следующей ссылке для авторизации: {auth_url}")
 
     # Reset the user's state
     user_states.pop(user_id, None)
@@ -200,66 +206,24 @@ def animal_chosen(user_id, chosen_animal):
     user_states[user_id] = User()
     user_states[user_id].question_index = 0
     user_states[user_id].state = 'interacting'
-    print("Animal chosen")
 
 # Function to post to VK
-def post_to_vk(user_id, selected_animal, image_url):
-    vk_token = 'YOUR_ACTUAL_VK_TOKEN'  # Replace with your actual VK token
-    vk_session = vk_api.VkApi(token=vk_token)
-    vk = vk_session.get_api()
+def generate_vk_auth_url():
+    app_id = '5366907c5366907c5366907c61504d0cc7553665366907c34a076ee82ed7486966116dd'  # Ваш VK App ID
+    redirect_uri = 'https://vk.com/app53189819'  # URL для обработки ответа
+    scope = 'wall,photos'  # Необходимые разрешения, разделенные запятыми
+    display = 'popup'  # Тип отображения для окна авторизации
+    response_type = 'token'  # Получить токен доступа непосредственно в фрагменте URL
 
-    try:
-        # Form the text of the message
-        message = f"Я выбрал стать спонсором {selected_animal}!"
+    # Генерация URL аутентификации
+    auth_url = (
+        f"https://oauth.vk.com/authorize?client_id={app_id}"
+        f"&redirect_uri={redirect_uri}&scope={scope}&display={display}"
+        f"&response_type={response_type}"
+    )
+    return auth_url
 
-        # Get the URL for uploading the image
-        response = vk.photos.getWallUploadServer()
-        upload_url = response['upload_url']
-
-        # Upload the image with a timeout
-        try:
-            response = requests.get(image_url, timeout=10)
-            response.raise_for_status()  # Check for HTTP errors
-        except requests.exceptions.RequestException as e:
-            bot.send_message(user_id, "Не удалось загрузить изображение. Пожалуйста, попробуйте позже.")
-            print(f"Error fetching image: {e}")
-            return
-
-        # Upload the image to VK
-        files = {'file': ('image.jpg', response.content)}
-        upload_response = requests.post(upload_url, files=files, timeout=10)
-        upload_response.raise_for_status()
-        upload_response = upload_response.json()
-
-        # Save the image on the VK wall
-        save_response = vk.photos.saveWallPhoto(
-            server=upload_response['server'],
-            photo=upload_response['photo'],
-            hash=upload_response['hash']
-        )
-
-        # Get the ID of the uploaded photo
-        photo_id = save_response[0]['id']
-        owner_id = save_response[0]['owner_id']
-
-        # Post the message on the VK wall
-        vk.wall.post(
-            owner_id=owner_id,
-            from_group=1,
-            message=message,
-            attachments=f'photo{owner_id}_{photo_id}'
-        )
-
-        bot.send_message(user_id, "Ваше сообщение опубликовано в ВКонтакте! Вы можете поделиться им с друзьями.")
-    except vk_api.exceptions.ApiError as e:
-        bot.send_message(user_id, "Произошла ошибка при работе с ВКонтакте.")
-        print(f"VK API Error: {e}")
-    except requests.exceptions.RequestException as e:
-        bot.send_message(user_id, "Произошла ошибка при подключении к серверу. Пожалуйста, попробуйте позже.")
-        print(f"Network Error: {e}")
-    except Exception as e:
-        bot.send_message(user_id, "Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже.")
-        print(f"Unexpected Error: {e}")
+print(generate_vk_auth_url())
 
 # Start the bot
 bot.polling(none_stop=True, interval=0)
